@@ -1,0 +1,19 @@
+{
+    "cluster": "<ApiClusterArn>",
+    "count": 1,
+    "enableECSManagedTags": true,
+    "enableExecuteCommand": true,
+    "launchType": "FARGATE",
+    "networkConfiguration": {
+        "awsvpcConfiguration": {
+            "subnets": [
+                "<PublicAZASubnetId>"
+            ],
+            "securityGroups": [
+                "<ApiConatinerSecurityGroupId>"
+            ],
+            "assignPublicIp": "ENABLED"
+        }
+    },
+    "taskDefinition": "<DbMigrationTaskDefinitionArn>"
+}

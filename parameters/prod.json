@@ -1,0 +1,130 @@
+[
+    {
+      "ParameterKey": "ApiImage",
+      "ParameterValue": "<the_container_image_url_on_ecr>"
+    }, 
+    {
+        "ParameterKey": "ApiContainerPort",
+        "ParameterValue": "8000"
+    },
+    {
+        "ParameterKey": "ApiLoadBalancerPort",
+        "ParameterValue": "443"
+    },
+    {
+        "ParameterKey": "ApiHealthCheckPath",
+        "ParameterValue": "<health_check_uri_for_your_service>"
+    },
+    {
+        "ParameterKey": "ApiMinContainers",
+        "ParameterValue": "2"
+    },
+    {
+        "ParameterKey": "ApiMaxContainers",
+        "ParameterValue": "128"
+    },
+    {
+        "ParameterKey": "ApiAutoScalingTargetValue",
+        "ParameterValue": "50"
+    },
+    {
+        "ParameterKey": "HostedZoneName",
+        "ParameterValue": "<your_domain>"
+    },
+    {
+        "ParameterKey": "ApiSubdomain",
+        "ParameterValue": "erp"
+    },
+    {
+        "ParameterKey": "DbSubdomain",
+        "ParameterValue": "erp-aurora"
+    },
+    {
+        "ParameterKey": "Certificate",
+        "ParameterValue": "<the_certificate_arn_for_your_domain>"
+    },
+    {
+        "ParameterKey": "VpcCidrParam",
+        "ParameterValue": "10.8.0.0/16"
+    },
+    {
+        "ParameterKey": "PublicAZASubnetBlock",
+        "ParameterValue": "10.8.1.0/20"
+    },
+    {
+        "ParameterKey": "PrivateAZASubnetBlock",
+        "ParameterValue": "10.8.16.0/20"
+    },
+    {
+        "ParameterKey": "PublicAZBSubnetBlock",
+        "ParameterValue": "10.8.32.0/20"
+    },
+    {
+        "ParameterKey": "PrivateAZBSubnetBlock",
+        "ParameterValue": "10.8.48.0/20"
+    },
+    {
+        "ParameterKey": "MultiAvailabilityZones",
+        "ParameterValue": "true"
+    },
+    {
+        "ParameterKey": "EnableVpcFlowLogs",
+        "ParameterValue": "true"
+    },
+    {
+        "ParameterKey": "KeySpec",
+        "ParameterValue": "SYMMETRIC_DEFAULT"
+    },
+    {
+        "ParameterKey": "KeyUsage",
+        "ParameterValue": "ENCRYPT_DECRYPT"
+    },
+    {
+        "ParameterKey": "SecretName",
+        "ParameterValue": ""
+    },
+    {
+        "ParameterKey": "DBName",
+        "ParameterValue": "erpprod"
+    },
+    {
+        "ParameterKey": "DBMasterUsername",
+        "ParameterValue": "erpprod"
+    },
+    {
+        "ParameterKey": "DBPassword",
+        "ParameterValue": ""
+    },
+    {
+        "ParameterKey": "DBBackupRetentionPeriod",
+        "ParameterValue": "5"
+    },
+    {
+        "ParameterKey": "EnableDataApi",
+        "ParameterValue": "true"
+    },
+    {
+        "ParameterKey": "DbAutoPause",
+        "ParameterValue": "false"
+    },
+    {
+        "ParameterKey": "DbMaxCapacity",
+        "ParameterValue": "12"
+    },
+    {
+        "ParameterKey": "DbMinCapacity",
+        "ParameterValue": "2"
+    },
+    {
+        "ParameterKey": "DbSecondsUntilAutoPause",
+        "ParameterValue": "600"
+    },
+    {
+        "ParameterKey": "DbEngineVersion",
+        "ParameterValue": "5.6.10a"
+    },
+    {
+        "ParameterKey": "DbPort",
+        "ParameterValue": "3306"
+    }
+]

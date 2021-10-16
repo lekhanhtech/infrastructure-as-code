@@ -1,0 +1,1064 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: An example CloudFormation template for Fargate.
+Parameters:
+  #For key and secret values
+  KeySpec:
+    Description: 'Specify the type of the CMK.'
+    Type: String
+    AllowedValues:
+    - SYMMETRIC_DEFAULT
+    - RSA_2048
+    - RSA_3072
+    - RSA_4096
+    - ECC_NIST_P256
+    - ECC_NIST_P384
+    - ECC_NIST_P521
+    - ECC_SECG_P256K1
+    Default: SYMMETRIC_DEFAULT
+  KeyUsage:
+    Description: 'Which cryptographic operations should the CMK support?'
+    Type: String
+    AllowedValues:
+    - ENCRYPT_DECRYPT
+    - SIGN_VERIFY
+    Default: ENCRYPT_DECRYPT
+  SecretName:
+    Description: 'Optional name of the secret.'
+    Type: String
+    Default: ''
+  DBMasterUsername:
+    Description: 'The master user name for a DB instance.'
+    Type: 'String'
+    Default: master
+  DBPassword:
+    Description: 'Optional password to be used in the secret. Use this if you need to preset the password otherwise a random password is generated.'
+    Type: 'String'
+    Default: ''
+
+  #For VPC
+  VpcCidrParam:
+    Type: String
+    Description: VPC CIDR. For more info, see http://docs.aws.amazon.com/AmazonVPC/latest/UserGuide/VPC_Subnets.html#VPC_Sizing
+    AllowedPattern: "^(10|172|192)\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\/(16|17|18|19|20|21|22|23|24|25|26|27|28)$"
+    ConstraintDescription: must be valid IPv4 CIDR block (/16 to /28) from the private address ranges defined in RFC 1918.
+
+  # Public Subnets
+  PublicAZASubnetBlock:
+    Type: String
+    Description: Subnet CIDR for first Availability Zone
+    AllowedPattern: "^(10|172|192)\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\/(16|17|18|19|20|21|22|23|24|25|26|27|28)$"
+    ConstraintDescription: must be valid IPv4 CIDR block (/16 to /28) from the private address ranges defined in RFC 1918.
+
+  PublicAZBSubnetBlock:
+    Type: String
+    Description: Subnet CIDR for second Availability Zone
+    AllowedPattern: "^(10|172|192)\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\/(16|17|18|19|20|21|22|23|24|25|26|27|28)$"
+    ConstraintDescription: must be valid IPv4 CIDR block (/16 to /28) from the private address ranges defined in RFC 1918.
+
+  # Private Subnets
+  PrivateAZASubnetBlock:
+    Type: String
+    Description: Subnet CIDR for first Availability Zone (e.g. us-west-2a, us-east-1b)
+    AllowedPattern: "^(10|172|192)\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\/(16|17|18|19|20|21|22|23|24|25|26|27|28)$"
+    ConstraintDescription: must be valid IPv4 CIDR block (/16 to /28) from the private address ranges defined in RFC 1918.
+
+  PrivateAZBSubnetBlock:
+    Type: String
+    Description: Subnet CIDR for second Availability Zone (e.g. us-west-2b, us-east-1c)
+    AllowedPattern: "^(10|172|192)\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\/(16|17|18|19|20|21|22|23|24|25|26|27|28)$"
+    ConstraintDescription: must be valid IPv4 CIDR block (/16 to /28) from the private address ranges defined in RFC 1918.
+
+  MultiAvailabilityZones:
+    Type: String
+    Description: Optional configuration for Multi Availability Zone. If the value is not true, we only deploy infrastructure on 1 Availability Zone.
+    AllowedPattern: "^(true|false)$"
+    Default: "false"
+    ConstraintDescription: must be true or false (case sensitive).
+
+  EnableVpcFlowLogs:
+    Type: String
+    Description: Optional configuration for enabling VPC Flow Logs sent to CloudWatch Logs. Default configuration has no VPC Flow Logs enabled.
+    AllowedPattern: "^(true|false)$"
+    Default: "false"
+    ConstraintDescription: must be true or false (case sensitive).
+
+  Certificate:
+    Type: String
+    # Update with the certificate ARN from Certificate Manager, which must exist in the same region.
+    Default: 'arn:aws:acm:region:123456789012:certificate/00000000-0000-0000-0000-000000000000'
+  ApiImage:
+    Type: String
+    # Update with the Docker image. "You can use images in the Docker Hub registry or specify other repositories (repository-url/image:tag)."
+    Default: '123456789012.dkr.ecr.region.amazonaws.com/image:tag'
+  ApiContainerPort:
+    Type: Number
+    Default: 8000
+  ApiLoadBalancerPort:
+    Type: Number
+    Default: 443
+  ApiHealthCheckPath:
+    Type: String
+    Default: '/healthcheck/'
+  HostedZoneName:
+    Type: String
+    Default: ''
+  ApiSubdomain:
+    Type: String
+    Default: api
+  # for autoscaling
+  ApiMinContainers:
+    Type: Number
+    Default: 1
+  ApiMaxContainers:
+    Type: Number
+    Default: 10
+  # target CPU utilization (%)
+  ApiAutoScalingTargetValue:
+    Type: Number
+    Default: 50
+
+  # For database
+  DBName:
+    Description: 'Name of the database.'
+    Type: String
+    Default: ''
+  DBBackupRetentionPeriod:
+    Description: 'The number of days to keep snapshots of the cluster.'
+    Type: Number
+    MinValue: 1
+    MaxValue: 35
+    Default: 30
+  EnableDataApi:
+    Description: 'Enable the Data API (https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api.html).'
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+  DbAutoPause:
+    Description: 'Enable automatic pause for a Serverless Aurora cluster. A cluster can be paused only when it has no connections. If a cluster is paused for more than seven days, the cluster might be backed up with a snapshot. In this case, the cluster is restored when there is a request to connect to it.'
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+  DbMaxCapacity:
+    Description: 'The maximum capacity units for a Serverless Aurora cluster.'
+    Type: Number
+    AllowedValues: [1, 2, 4, 8, 16, 32, 64, 128, 256]
+    Default: 2
+  DbMinCapacity:
+    Description: 'The minimum capacity units for a Serverless Aurora cluster.'
+    Type: Number
+    AllowedValues: [1, 2, 4, 8, 16, 32, 64, 128, 256]
+    Default: 2
+  DbSecondsUntilAutoPause:
+    Description: 'The time, in seconds, before a Serverless Aurora cluster is paused.'
+    Type: Number
+    MinValue: 1
+    MaxValue: 86400
+    Default: 300
+  DbEngineVersion:
+    Description: 'Aurora Serverless MySQL version.'
+    Type: String
+    Default: '5.6.10a'
+    AllowedValues: ['5.6.10a', '5.7.mysql-aurora.2.07.1'] # aws rds describe-db-engine-versions --engine aurora --query 'DBEngineVersions[?contains(SupportedEngineModes,`serverless`)]'; aws rds describe-db-engine-versions --engine aurora-mysql --query 'DBEngineVersions[?contains(SupportedEngineModes,`serverless`)]'
+  DbSubdomain:
+    Type: String
+    Default: 'aurora'
+  DbPort:
+    Type: Number
+    Default: 3306
+
+Mappings:
+  EngineVersionMap:
+    '5.6.10a':
+      ClusterParameterGroupFamily: 'aurora5.6'
+      EngineVersion: '5.6.10a'
+      Engine: 'aurora'
+    '5.7.mysql-aurora.2.07.1':
+      ClusterParameterGroupFamily: 'aurora-mysql5.7'
+      EngineVersion: '5.7.mysql_aurora.2.07.1'
+      Engine: 'aurora-mysql'
+
+Conditions:
+  KmsHasSymmetricKey: !Equals [!Ref KeySpec, 'SYMMETRIC_DEFAULT']
+  HasSecretName: !Not [!Equals [!Ref SecretName, '']]
+  HasPassword: !Not [!Equals [!Ref DBPassword, '']]
+  HighlyAvailable: !Equals [!Ref MultiAvailabilityZones, "true"]
+  NotHighlyAvailable: !Equals [!Ref MultiAvailabilityZones, "false"]
+  VpcFlowLogs: !Equals [!Ref EnableVpcFlowLogs, "true"]
+  HasZone: !Not [!Equals [!Ref HostedZoneName, '']]
+
+Resources:
+  #Key and secret values
+  Key:
+    # DeletionPolicy: Retain
+    # UpdateReplacePolicy: Retain
+    Type: 'AWS::KMS::Key'
+    Properties:
+      EnableKeyRotation: !If [KmsHasSymmetricKey, true, false]
+      KeySpec: !Ref KeySpec
+      KeyUsage: !Ref KeyUsage
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: 'Allow direct access to key to the account'
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: 'Allow access through AWS Secrets Manager for all principals in the account that are authorized to use AWS Secrets Manager'
+            Effect: Allow
+            Principal:
+              AWS: '*'
+            Action:
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt'
+              - 'kms:CreateGrant'
+              - 'kms:DescribeKey'
+            Resource: '*'
+            Condition:
+              StringEquals:
+                'kms:ViaService': !Sub 'secretsmanager.${AWS::Region}.amazonaws.com'
+                'kms:CallerAccount':  !Ref 'AWS::AccountId'
+          - Sid: 'Allow access through AWS Secrets Manager for all principals in the account that are authorized to use AWS Secrets Manager'
+            Effect: Allow
+            Principal:
+              AWS: '*'
+            Action: 'kms:GenerateDataKey*'
+            Resource: '*'
+            Condition:
+              StringEquals:
+                'kms:CallerAccount': !Ref 'AWS::AccountId'
+              StringLike:
+                'kms:ViaService': 'secretsmanager.*.amazonaws.com'
+          - Sid: 'Allow access through RDS for all principals in the account that are authorized to use RDS'
+            Effect: Allow
+            Principal:
+              AWS: '*'
+            Action:
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:CreateGrant'
+              - 'kms:ListGrants'
+              - 'kms:DescribeKey'
+            Resource: '*'
+            Condition:
+              StringEquals:
+                'kms:ViaService': !Sub 'rds.${AWS::Region}.amazonaws.com'
+                'kms:CallerAccount': !Ref 'AWS::AccountId'
+          - Sid: 'Allow access through S3'
+            Effect: Allow
+            Principal:
+              AWS: '*'
+            Action:
+              - 'kms:Decrypt'
+            Resource: '*'
+            Condition:
+              StringEquals:
+                'kms:ViaService': !Sub 's3.${AWS::Region}.amazonaws.com'
+  KeyAlias:
+    # DeletionPolicy: Retain
+    # UpdateReplacePolicy: Retain
+    Type: 'AWS::KMS::Alias'
+    Properties:
+      AliasName: !Sub 'alias/${AWS::StackName}'
+      TargetKeyId: !Ref Key
+  Secret:
+    Type: 'AWS::SecretsManager::Secret'
+    Properties:
+      Name: !If [HasSecretName, !Ref SecretName, !Ref 'AWS::StackName']
+      KmsKeyId: !Ref Key
+      GenerateSecretString:
+        !If
+        - HasPassword
+        - !Ref AWS::NoValue
+        - SecretStringTemplate: !Sub '{"username": "${DBMasterUsername}"}'
+          GenerateStringKey: "password"
+          PasswordLength: 30
+          ExcludeCharacters: '"@/\'
+      SecretString:
+        !If
+        - HasPassword
+        - !Sub '{"username":"${DBMasterUsername}","password":"${DBPassword}"}'
+        - !Ref 'AWS::NoValue'
+
+  # VPC
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: !Ref VpcCidrParam
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}'
+  InternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}'
+  InternetGatewayAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+  PublicRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-public'
+        - Key: Type
+          Value: public
+  PublicSubnetsRoute:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+    DependsOn:
+      - InternetGatewayAttachment
+  PublicAZASubnet:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      CidrBlock: !Ref PublicAZASubnetBlock
+      AvailabilityZone: !Select 
+        - 0
+        - !GetAZs ''
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub 
+            - '${AWS::StackName}-public-${AZ}'
+            - AZ: !Select 
+                - 0
+                - !GetAZs ''
+        - Key: Type
+          Value: public
+      VpcId: !Ref VPC
+  PublicAZASubnetRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PublicAZASubnet
+      RouteTableId: !Ref PublicRouteTable
+  PublicAZBSubnet:
+    Type: 'AWS::EC2::Subnet'
+    Condition: HighlyAvailable
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicAZBSubnetBlock
+      AvailabilityZone: !Select 
+        - 1
+        - !GetAZs ''
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub 
+            - '${AWS::StackName}-public-${AZ}'
+            - AZ: !Select 
+                - 1
+                - !GetAZs ''
+        - Key: Type
+          Value: public
+  PublicAZBSubnetRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Condition: HighlyAvailable
+    Properties:
+      SubnetId: !Ref PublicAZBSubnet
+      RouteTableId: !Ref PublicRouteTable
+  PrivateAZASubnet:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateAZASubnetBlock
+      AvailabilityZone: !Select 
+        - 0
+        - !GetAZs ''
+      Tags:
+        - Key: Name
+          Value: !Sub 
+            - '${AWS::StackName}-private-${AZ}'
+            - AZ: !Select 
+                - 0
+                - !GetAZs ''
+        - Key: Type
+          Value: private
+  PrivateAZARouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub 
+            - '${AWS::StackName}-private-${AZ}'
+            - AZ: !Select 
+                - 0
+                - !GetAZs ''
+        - Key: Type
+          Value: private
+  # PrivateAZARoute:
+  #   Type: 'AWS::EC2::Route'
+  #   Properties:
+  #     RouteTableId: !Ref PrivateAZARouteTable
+  #     DestinationCidrBlock: 0.0.0.0/0
+  #     NatGatewayId: !Ref AZANatGateway
+  PrivateAZARouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PrivateAZASubnet
+      RouteTableId: !Ref PrivateAZARouteTable
+  PrivateAZBSubnet:
+    Type: 'AWS::EC2::Subnet'
+    Condition: HighlyAvailable
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateAZBSubnetBlock
+      AvailabilityZone: !Select 
+        - 1
+        - !GetAZs ''
+      Tags:
+        - Key: Name
+          Value: !Sub 
+            - '${AWS::StackName}-private-${AZ}'
+            - AZ: !Select 
+                - 1
+                - !GetAZs ''
+        - Key: Type
+          Value: private
+  PrivateAZBRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Condition: HighlyAvailable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub 
+            - '${AWS::StackName}-private-${AZ}'
+            - AZ: !Select 
+                - 1
+                - !GetAZs ''
+        - Key: Type
+          Value: private
+  PrivateAZBRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Condition: HighlyAvailable
+    Properties:
+      SubnetId: !Ref PrivateAZBSubnet
+      RouteTableId: !Ref PrivateAZBRouteTable
+  
+  # VPC Flow Logs
+  FlowLogLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: VpcFlowLogs
+    Properties:
+      LogGroupName: !Sub "FlowLogs/${AWS::StackName}"
+      # RetentionInDays: 7
+
+  FlowLogsRole:
+    Type: AWS::IAM::Role
+    Condition: VpcFlowLogs
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - vpc-flow-logs.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: AllowPublishingFlowLogsToCloudWatch
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                Resource: "*"
+
+  VpcFlowLogs:
+    Type: AWS::EC2::FlowLog
+    Condition: VpcFlowLogs
+    # DeletionPolicy: Retain
+    # UpdateReplacePolicy: Retain
+    Properties:
+      DeliverLogsPermissionArn: !GetAtt FlowLogsRole.Arn
+      LogDestination: !GetAtt FlowLogLogGroup.Arn
+      LogDestinationType: cloud-watch-logs
+      ResourceId: !Ref VPC
+      ResourceType: VPC
+      TrafficType: ALL
+
+  # For database
+  SecretTargetAttachment:
+    Type: 'AWS::SecretsManager::SecretTargetAttachment'
+    Properties:
+      TargetId: !Ref DBCluster
+      SecretId: !Ref Secret
+      TargetType: 'AWS::RDS::DBCluster'
+  DbDNSRecord:
+    Condition: HasZone
+    Type: 'AWS::Route53::RecordSet'
+    Properties:
+      HostedZoneName: !Join ['', [!Ref HostedZoneName, .]]
+      Name: !Join ['', [!Ref DbSubdomain, ., !Ref HostedZoneName, .]]
+      ResourceRecords:
+      - !GetAtt 'DBCluster.Endpoint.Address'
+      TTL: 60
+      Type: CNAME
+  DbClusterSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: !Ref 'AWS::StackName'
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: !Ref DbPort
+        ToPort: !Ref DbPort
+        SourceSecurityGroupId: !Ref ApiContainerSecurityGroup
+      VpcId: !Ref VPC
+  DBSubnetGroup:
+    Type: 'AWS::RDS::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupDescription: !Ref 'AWS::StackName'
+      SubnetIds:
+        - !Ref PrivateAZASubnet
+        - !If
+          - HighlyAvailable
+          - !Ref PrivateAZBSubnet
+          - !Ref 'AWS::NoValue'
+  DBClusterParameterGroup:
+    Type: 'AWS::RDS::DBClusterParameterGroup'
+    Properties:
+      Description: !Ref 'AWS::StackName'
+      Family: !FindInMap [EngineVersionMap, !Ref DbEngineVersion, ClusterParameterGroupFamily]
+      Parameters:
+        character_set_client: utf8
+        character_set_connection: utf8
+        character_set_database: utf8
+        character_set_filesystem: utf8
+        character_set_results: utf8
+        character_set_server: utf8
+        collation_connection: utf8_general_ci
+        collation_server: utf8_general_ci
+  DBCluster:
+    DeletionPolicy: Snapshot # default
+    UpdateReplacePolicy: Snapshot
+    Type: 'AWS::RDS::DBCluster'
+    Properties:
+      BackupRetentionPeriod: !Ref DBBackupRetentionPeriod
+      DatabaseName: !Ref DBName
+      DBClusterParameterGroupName: !Ref DBClusterParameterGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      EnableHttpEndpoint: !Ref EnableDataApi
+      Engine: !FindInMap [EngineVersionMap, !Ref DbEngineVersion, Engine]
+      EngineMode: serverless
+      EngineVersion: !FindInMap [EngineVersionMap, !Ref DbEngineVersion, EngineVersion]
+      KmsKeyId: !GetAtt 'Key.Arn'
+      MasterUsername: !Ref DBMasterUsername
+      MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref Secret, ':SecretString:password}}']]
+      # PreferredBackupWindow: !Ref PreferredBackupWindow TODO re-enable as soon as CloudFormation bug ix fixed
+      # PreferredMaintenanceWindow: !Ref PreferredMaintenanceWindow TODO re-enable as soon as CloudFormation bug ix fixed
+      ScalingConfiguration:
+        AutoPause: !Ref DbAutoPause
+        MaxCapacity: !Ref DbMaxCapacity
+        MinCapacity: !Ref DbMinCapacity
+        SecondsUntilAutoPause: !Ref DbSecondsUntilAutoPause
+      SnapshotIdentifier: !Ref 'AWS::NoValue'
+      StorageEncrypted: true
+      VpcSecurityGroupIds:
+      - !Ref DbClusterSecurityGroup
+
+  # For ECS
+  # A role needed by ECS
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join ['', [!Ref AWS::StackName, ECS, ExecutionRole]]
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+      Policies:
+        - PolicyName: !Join ['', [!Ref AWS::StackName, ECS, ExecutionRolePolicy]]
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'kms:Decrypt'
+                Resource:
+                  - !GetAtt 'Key.Arn'
+              - Effect: Allow
+                Action: 
+                  - 'secretsmanager:GetSecretValue'
+                Resource:
+                  # - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:*'
+                  - !Ref Secret
+              - Effect: Allow
+                Action:
+                  - 's3:ListBucket'
+                  - 's3:GetBucketLocation'
+                Resource: !Sub 'arn:aws:s3:::${Bucket}'
+              - Effect: Allow
+                Action:
+                  - 's3:PutObject'
+                Resource: !Sub 'arn:aws:s3:::${Bucket}/*'
+
+  # A role for the containers
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join ['', [!Ref AWS::StackName, ECS, TaskRole]]
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      # ManagedPolicyArns:
+      #   -
+      # Policies:
+      #   -
+  # A role needed for auto scaling
+  AutoScalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join ['', [!Ref AWS::StackName, ECS, AutoScalingRole]]
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceAutoscaleRole'
+  ApiCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Join ['', [!Ref AWS::StackName, API, Cluster]]
+  ApiTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    # Makes sure the log group is created before it is used.
+    DependsOn: ApiLogGroup
+    Properties:
+      # Name of the task definition. Subsequent versions of the task definition are grouped together under this name.
+      Family: !Join ['', [!Ref AWS::StackName, API, TaskDefinition]]
+      # awsvpc is required for Fargate
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      # 256 (.25 vCPU) - Available memory values: 0.5GB, 1GB, 2GB
+      # 512 (.5 vCPU) - Available memory values: 1GB, 2GB, 3GB, 4GB
+      # 1024 (1 vCPU) - Available memory values: 2GB, 3GB, 4GB, 5GB, 6GB, 7GB, 8GB
+      # 2048 (2 vCPU) - Available memory values: Between 4GB and 16GB in 1GB increments
+      # 4096 (4 vCPU) - Available memory values: Between 8GB and 30GB in 1GB increments
+      Cpu: 256
+      # 0.5GB, 1GB, 2GB - Available cpu values: 256 (.25 vCPU)
+      # 1GB, 2GB, 3GB, 4GB - Available cpu values: 512 (.5 vCPU)
+      # 2GB, 3GB, 4GB, 5GB, 6GB, 7GB, 8GB - Available cpu values: 1024 (1 vCPU)
+      # Between 4GB and 16GB in 1GB increments - Available cpu values: 2048 (2 vCPU)
+      # Between 8GB and 30GB in 1GB increments - Available cpu values: 4096 (4 vCPU)
+      Memory: 0.5GB
+      # A role needed by ECS.
+      # "The ARN of the task execution role that containers in this task can assume. All containers in this task are granted the permissions that are specified in this role."
+      # "There is an optional task execution IAM role that you can specify with Fargate to allow your Fargate tasks to make API calls to Amazon ECR."
+      ExecutionRoleArn: !Ref ExecutionRole
+      # "The Amazon Resource Name (ARN) of an AWS Identity and Access Management (IAM) role that grants containers in the task permission to call AWS APIs on your behalf."
+      TaskRoleArn: !Ref TaskRole
+      ContainerDefinitions:
+        - Name: !Join ['', [!Ref AWS::StackName, API]]
+          Image: !Ref ApiImage
+          PortMappings:
+            - ContainerPort: !Ref ApiContainerPort
+          # Send logs to CloudWatch Logs
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref ApiLogGroup
+              awslogs-stream-prefix: ecs
+          Environment:
+            - Name: DB_NAME
+              Value: !Ref DBName
+            - Name: DB_HOST
+              Value: !GetAtt 'DBCluster.Endpoint.Address'
+            - Name: DB_PORT
+              Value: !Ref DbPort
+          Secrets:
+            - Name: DB_USER
+              ValueFrom: !Join ['', [!Ref Secret, ':username::']]
+            - Name: DB_PASSWORD
+              ValueFrom: !Join ['', [!Ref Secret, ':password::']]
+  DbMigrationTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    # Makes sure the log group is created before it is used.
+    DependsOn: ApiLogGroup
+    Properties:
+      # Name of the task definition. Subsequent versions of the task definition are grouped together under this name.
+      Family: !Join ['', [!Ref AWS::StackName, DbMigration, TaskDefinition]]
+      # awsvpc is required for Fargate
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: 256
+      Memory: 0.5GB
+      # A role needed by ECS.
+      # "The ARN of the task execution role that containers in this task can assume. All containers in this task are granted the permissions that are specified in this role."
+      # "There is an optional task execution IAM role that you can specify with Fargate to allow your Fargate tasks to make API calls to Amazon ECR."
+      ExecutionRoleArn: !Ref ExecutionRole
+      # "The Amazon Resource Name (ARN) of an AWS Identity and Access Management (IAM) role that grants containers in the task permission to call AWS APIs on your behalf."
+      TaskRoleArn: !Ref TaskRole
+      ContainerDefinitions:
+        - Name: !Join ['', [!Ref AWS::StackName, DbMigration]]
+          Image: !Ref ApiImage
+          PortMappings:
+            - ContainerPort: !Ref ApiContainerPort
+          # Send logs to CloudWatch Logs
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref ApiLogGroup
+              awslogs-stream-prefix: db-migration
+          Environment:
+            - Name: DB_NAME
+              Value: !Ref DBName
+            - Name: DB_HOST
+              Value: !GetAtt 'DBCluster.Endpoint.Address'
+            - Name: DB_PORT
+              Value: !Ref DbPort
+          Secrets:
+            - Name: DB_USER
+              ValueFrom: !Join ['', [!Ref Secret, ':username::']]
+            - Name: DB_PASSWORD
+              ValueFrom: !Join ['', [!Ref Secret, ':password::']]
+          Command:
+            - /bin/bash
+            - '-c'
+            - 'ls ./ && python ./manage.py migrate'
+  DbResetTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    # Makes sure the log group is created before it is used.
+    DependsOn: ApiLogGroup
+    Properties:
+      # Name of the task definition. Subsequent versions of the task definition are grouped together under this name.
+      Family: !Join ['', [!Ref AWS::StackName, DbReset, TaskDefinition]]
+      # awsvpc is required for Fargate
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: 256
+      Memory: 0.5GB
+      # A role needed by ECS.
+      # "The ARN of the task execution role that containers in this task can assume. All containers in this task are granted the permissions that are specified in this role."
+      # "There is an optional task execution IAM role that you can specify with Fargate to allow your Fargate tasks to make API calls to Amazon ECR."
+      ExecutionRoleArn: !Ref ExecutionRole
+      # "The Amazon Resource Name (ARN) of an AWS Identity and Access Management (IAM) role that grants containers in the task permission to call AWS APIs on your behalf."
+      TaskRoleArn: !Ref TaskRole
+      ContainerDefinitions:
+        - Name: !Join ['', [!Ref AWS::StackName, DbReset]]
+          Image: !Ref ApiImage
+          PortMappings:
+            - ContainerPort: !Ref ApiContainerPort
+          # Send logs to CloudWatch Logs
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref ApiLogGroup
+              awslogs-stream-prefix: db-reset
+          Environment:
+            - Name: DB_NAME
+              Value: !Ref DBName
+            - Name: DB_HOST
+              Value: !GetAtt 'DBCluster.Endpoint.Address'
+            - Name: DB_PORT
+              Value: !Ref DbPort
+          Secrets:
+            - Name: DB_USER
+              ValueFrom: !Join ['', [!Ref Secret, ':username::']]
+            - Name: DB_PASSWORD
+              ValueFrom: !Join ['', [!Ref Secret, ':password::']]
+          Command:
+            - /bin/bash
+            - '-c'
+            - './resetDB.sh'
+  ApiContainerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Join ['', [!Ref AWS::StackName, API, ContainerSecurityGroup]]
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref ApiContainerPort
+          ToPort: !Ref ApiContainerPort
+          SourceSecurityGroupId: !Ref ApiLoadBalancerSecurityGroup
+  ApiLoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Join ['', [!Ref AWS::StackName, API, LoadBalancerSecurityGroup]]
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref ApiLoadBalancerPort
+          ToPort: !Ref ApiLoadBalancerPort
+          CidrIp: 0.0.0.0/0
+  ApiService:
+    Type: AWS::ECS::Service
+    # This dependency is needed so that the load balancer is setup correctly in time
+    DependsOn:
+      - ApiListenerHTTPS
+    Properties: 
+      ServiceName: !Join ['', [!Ref AWS::StackName, API]]
+      Cluster: !Ref ApiCluster
+      TaskDefinition: !Ref ApiTaskDefinition
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      DesiredCount: 2
+      # This may need to be adjusted if the container takes a while to start up
+      HealthCheckGracePeriodSeconds: 60
+      LaunchType: FARGATE
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          # change to DISABLED if you're using private subnets that have access to a NAT gateway
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !Ref PublicAZASubnet
+            - !If
+              - HighlyAvailable
+              - !Ref PublicAZBSubnet
+              - !Ref 'AWS::NoValue'
+          SecurityGroups:
+            - !Ref ApiContainerSecurityGroup
+      LoadBalancers:
+        - ContainerName: !Join ['', [!Ref AWS::StackName, API]]
+          ContainerPort: !Ref ApiContainerPort
+          TargetGroupArn: !Ref ApiTargetGroup
+  ApiTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      # will look for a 200 status code by default unless specified otherwise
+      HealthCheckPath: !Ref ApiHealthCheckPath
+      HealthCheckTimeoutSeconds: 10
+      UnhealthyThresholdCount: 2
+      HealthyThresholdCount: 2
+      Name: !Join ['', [!Ref AWS::StackName, API, TargetGroup]]
+      Port: !Ref ApiContainerPort
+      Protocol: HTTP
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 60 # default is 300
+      TargetType: ip
+      VpcId: !Ref VPC
+  ApiListenerHTTPS:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref ApiTargetGroup
+          Type: forward
+      LoadBalancerArn: !Ref ApiLoadBalancer
+      Port: !Ref ApiLoadBalancerPort
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref Certificate
+  ApiLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      LoadBalancerAttributes:
+        # this is the default, but is specified here in case it needs to be changed
+        - Key: idle_timeout.timeout_seconds
+          Value: 60
+      Name: !Join ['', [!Ref AWS::StackName, API, LoadBalancer]]
+      # "internal" is also an option
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref ApiLoadBalancerSecurityGroup
+      Subnets:
+        - !Ref PublicAZASubnet
+        - !If
+          - HighlyAvailable
+          - !Ref PublicAZBSubnet
+          - !Ref 'AWS::NoValue'
+  ApiDNSRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasZone
+    Properties:
+      HostedZoneName: !Join ['', [!Ref HostedZoneName, .]]
+      Name: !Join ['', [!Ref ApiSubdomain, ., !Ref HostedZoneName, .]]
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt ApiLoadBalancer.DNSName
+        HostedZoneId: !GetAtt ApiLoadBalancer.CanonicalHostedZoneID
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Join ['', [/ecs/, !Ref AWS::StackName, API, TaskDefinition]]
+  ApiAutoScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MinCapacity: !Ref ApiMinContainers
+      MaxCapacity: !Ref ApiMaxContainers
+      ResourceId: !Join ['/', [service, !Ref ApiCluster, !GetAtt ApiService.Name]]
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+      # "The Amazon Resource Name (ARN) of an AWS Identity and Access Management (IAM) role that allows Application Auto Scaling to modify your scalable target."
+      RoleARN: !GetAtt AutoScalingRole.Arn
+  ApiAutoScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Join ['', [!Ref AWS::StackName, API, AutoScalingPolicy]]
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ApiAutoScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        ScaleInCooldown: 10
+        ScaleOutCooldown: 10
+        # Keep things at or lower than 50% CPU utilization, for example
+        TargetValue: !Ref ApiAutoScalingTargetValue
+
+  #S3 bucket for user's files
+  Bucket: # cannot be deleted with data
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Join ['-', [!Ref AWS::StackName, user, storage]]
+      LifecycleConfiguration:
+        Rules:
+        - AbortIncompleteMultipartUpload:
+            DaysAfterInitiation: 7
+          Status: Enabled
+        - NoncurrentVersionExpirationInDays: 3
+          Status: Enabled
+      VersioningConfiguration: 
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              KMSMasterKeyID: !Ref Key
+              SSEAlgorithm: 'aws:kms'
+  BucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Sid: Allow SSL Requests Only
+          Effect: Deny
+          Principal: '*'
+          Action: 's3:*'
+          Resource:
+          - !GetAtt 'Bucket.Arn'
+          - !Sub '${Bucket.Arn}/*'
+          Condition:
+            Bool:
+              'aws:SecureTransport': false
+        - Sid: Private Access And Kms Key
+          Principal: '*'
+          Action: 's3:PutObject*'
+          Effect: Deny
+          Resource: !Sub '${Bucket.Arn}/*'
+          Condition:
+            StringNotEquals:
+              's3:x-amz-server-side-encryption': ''
+              's3:x-amz-server-side-encryption-aws-kms-key-id': !Sub '${Key.Arn}'
+        # - Sid: Public Read Access
+        #   Principal: '*'
+        #   Action: 's3:GetObject'
+        #   Effect: Allow
+        #   Resource: !Sub '${Bucket.Arn}/*'
+
+Outputs:
+  StackName:
+    Description: 'Stack name.'
+    Value: !Sub '${AWS::StackName}'
+  KeyId:
+    Description: 'Key id.'
+    Value: !Ref Key
+    Export:
+      Name: !Sub '${AWS::StackName}-KeyId'
+  SecretArn:
+    Description: 'Secret Arn'
+    Value: !Ref Secret
+    Export:
+      Name: !Sub '${AWS::StackName}-SecretArn'
+  ApiClusterArn:
+    Description: 'ApiCluster Arn'
+    Value: !GetAtt 'ApiCluster.Arn'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiClusterArn'
+  ApiServiceName:
+    Description: 'The name of API service'
+    Value: !GetAtt 'ApiService.Name'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiServiceName'
+  PublicAZASubnetId:
+    Description: 'Public Available Zone A Subnet Id'
+    Value: !Ref PublicAZASubnet
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicAZASubnetId'
+  PublicAZBSubnetId:
+    Description: 'Public Available Zone B Subnet ID'
+    Value: !Ref PublicAZBSubnet
+    Condition: HighlyAvailable
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicAZBSubnetId'
+  ApiConatinerSecurityGroupId:
+    Description: 'API container security group ID'
+    Value: !Ref ApiContainerSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiConatinerSecurityGroupId'
+  DbMigrationTaskDefinitionArn:
+    Description: 'Database migration task definition ARN'
+    Value: !Ref 'DbMigrationTaskDefinition'
+    Export:
+      Name: !Sub '${AWS::StackName}-DbMigrationTaskDefinitionArn'
+  DbResetTaskDefinitionArn:
+    Description: 'Database reseting task definition ARN'
+    Value: !Ref 'DbResetTaskDefinition'
+    Export:
+      Name: !Sub '${AWS::StackName}-DbResetTaskDefinitionArn'
+  DbClusterName:
+    Description: 'The name of the cluster.'
+    Value: !Ref DBCluster
+    Export:
+      Name: !Sub '${AWS::StackName}-DbClusterName'
+  DbDNSName:
+    Description: 'The connection endpoint for the DB cluster.'
+    Value: !GetAtt 'DBCluster.Endpoint.Address'
+    Export:
+      Name: !Sub '${AWS::StackName}-DbDNSName'
+  DbSecurityGroupId:
+    Description: 'The security group used to manage access to RDS Aurora Serverless.'
+    Value: !Ref DbClusterSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-DbSecurityGroupId'
+  BucketName:
+    Description: 'Name of the bucket'
+    Value: !Ref Bucket
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketName'
+  BucketDomainName:
+    Description: 'Domain name of the bucket.'
+    Value: !GetAtt 'Bucket.DomainName'
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketDomainName'
+  Endpoint:
+    Description: Endpoint
+    Value: !Join ['', ['https://', !Ref ApiDNSRecord]]
